@@ -1,0 +1,65 @@
+#!/usr/bin/env node
+// elisys-pick: choose model, effort and autocompact for a session from the work orders actually
+// waiting in the queue, so one launcher (`elisys`) replaces three. Classification, cheapest first:
+//   docs  (sonnet, medium)   - the default; orders that touch documents only
+//   build (opus[1m], high)   - orders that touch code, schema, infra or CI paths
+//   deep  (fable, high)      - ONLY when an order names it ("Recommended launch: elisys-deep");
+//                              fable is the scarce budget, so it is never inferred
+// No --autocompact cap: v1.1.0's 350k/500k caps sat BELOW the session gate's own read size, so
+// sessions compacted during their mandatory reading. Compaction now happens only at Claude Code's
+// default, near the window's end, which /clear-per-order sessions mostly never reach.
+// A queue with mixed classes launches the strongest class present (deep > build > docs), because a
+// stronger model can do the lighter orders while the reverse fails. One session keeps one model:
+// that is a Claude Code boundary (hooks can observe or veto a model switch, never make one), and
+// the /clear-per-order flow makes the launch the task boundary anyway.
+// stdout: exactly "MODEL EFFORT" for the shell to read. The reasoning goes to stderr.
+// Fails open toward docs/sonnet and never blocks a launch.
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+
+const QUEUE = process.env.ELISYS_QUEUE || join(homedir(), 'elisys-inbox', '_prompts', 'queue');
+const MAP = {
+  build: ['opus[1m]', 'high'],
+  docs:  ['sonnet', 'medium'],
+  deep:  ['fable', 'high'],
+};
+const RANK = { docs: 0, build: 1, deep: 2 };
+const err = s => process.stderr.write(s + '\n');
+
+function classify(text) {
+  const rec = text.match(/Recommended launch:\s*`?elisys-(build|docs|deep)\b/i);
+  if (rec) return { cls: rec[1].toLowerCase(), why: 'the order names it' };
+  if (/(packages\/|services\/|apps\/|prisma|migration|terraform|\.github\/workflows|vitest\b|pnpm (test|build)|tsc\b)/i.test(text))
+    return { cls: 'build', why: 'touches code, schema, infra or CI paths' };
+  return { cls: 'docs', why: 'documents only' };
+}
+
+const arg = process.argv[2];
+let pick = null;
+const lines = [];
+try {
+  if (arg && MAP[arg]) { pick = arg; lines.push(`override: ${arg}`); }
+  else if (arg && existsSync(arg)) {
+    const c = classify(readFileSync(arg, 'utf8'));
+    pick = c.cls; lines.push(`${arg}: ${c.cls} (${c.why})`);
+  } else {
+    let files = [];
+    try { files = readdirSync(QUEUE).filter(n => /^\d/.test(n) && n.endsWith('.md')).sort(); } catch { /* no queue */ }
+    if (!files.length) {
+      pick = 'docs';
+      lines.push('queue empty (HELD files stay asleep): defaulting to docs/sonnet - relaunch with `elisys build` for code work');
+    } else {
+      for (const n of files) {
+        let c = { cls: 'docs', why: 'unreadable, counted as docs' };
+        try { c = classify(readFileSync(join(QUEUE, n), 'utf8')); } catch { /* keep default */ }
+        lines.push(`${n}: ${c.cls} (${c.why})`);
+        if (!pick || RANK[c.cls] > RANK[pick]) pick = c.cls;
+      }
+    }
+  }
+} catch { pick = 'docs'; lines.push('elisys-pick hit an error; defaulting to docs/sonnet'); }
+const [model, effort] = MAP[pick] || MAP.docs;
+for (const l of lines) err('  ' + l);
+err(`elisys: ${pick} -> model ${model}, effort ${effort}; compaction at Claude Code's default, near the window's end (named subagents default to sonnet)`);
+process.stdout.write(`${model} ${effort}\n`);

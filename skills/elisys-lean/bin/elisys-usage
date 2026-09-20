@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // elisys-usage: per-session token use from this machine's Claude Code transcripts.
 // Reads ~/.claude/projects/<dir matching --project>/**/*.jsonl. Prints counts only, never content.
-// The transcript format is internal to Claude Code and can change; this tool reports what it can parse
-// and says so when it parses nothing.
+// v1.0.2 additions: a "Plan limits" section fed by the rate-limits.json snapshot the status line
+// writes (every window Claude Code reports, Fable's weekly included), and a per-model table for the
+// current weekly window (resets Sunday 01:00 WAT). The transcript format is internal to Claude Code
+// and can change; this tool reports what it can parse and says so when it parses nothing.
 //
 //   elisys-usage [--days 7] [--project elisys] [--top 15] [--json]
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
@@ -16,14 +18,19 @@ const PROJECT = String(opt('project', 'elisys')).toLowerCase();
 const TOP = Number(opt('top', 15));
 const JSON_OUT = args.includes('--json');
 const ROOT = opt('root', join(homedir(), '.claude', 'projects'));
+const DATA = process.env.CLAUDE_PLUGIN_DATA || join(homedir(), '.claude', 'plugins', 'data', 'elisys-lean-skills-dir');
 const since = Date.now() - DAYS * 86400e3;
+// The weekly plan window resets Sunday 01:00 WAT, which is Sunday 00:00 UTC.
+const nowD = new Date();
+const resetTs = Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth(), nowD.getUTCDate() - nowD.getUTCDay());
+const scanSince = Math.min(since, resetTs);
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     const s = statSync(p);
     if (s.isDirectory()) walk(p, out);
-    else if (name.endsWith('.jsonl') && s.mtimeMs >= since) out.push(p);
+    else if (name.endsWith('.jsonl') && s.mtimeMs >= scanSince) out.push(p);
   }
   return out;
 }
@@ -34,58 +41,100 @@ const files = projectDirs.flatMap(d => walk(d));
 
 const sessions = new Map();
 const byModel = new Map();
+const byModelWeek = new Map();
 let parsed = 0;
 
 for (const f of files) {
   const isSub = f.includes(`${'/'}subagents${'/'}`) || basename(f).startsWith('agent-');
   const seen = new Map(); // message id -> usage (last write wins; one message can span several lines)
-  let sid = basename(f, '.jsonl'), compactions = 0, first = null, last = null;
+  let sid = basename(f, '.jsonl'), boundaries = 0, summaries = 0, first = null, last = null;
   for (const line of readFileSync(f, 'utf8').split('\n')) {
     if (!line) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
     if (o.sessionId) sid = o.sessionId; // subagent transcripts carry the parent session id, so they roll up
-    if (o.subtype === 'compact_boundary' || o.isCompactSummary === true) compactions++;
+    // A compaction writes both a boundary event and a summary line; counting both doubled the figure
+    // (measured, order 123 findings, 2026-09-20). Count boundaries; fall back to summaries when a
+    // transcript carries only those.
+    if (o.subtype === 'compact_boundary') boundaries++;
+    else if (o.isCompactSummary === true) summaries++;
     const u = o.message?.usage;
     if (!u || o.type !== 'assistant') continue;
     const t = Date.parse(o.timestamp || '') || null;
-    if (t && t < since) continue;
+    if (t && t < scanSince) continue;
     if (t) { first = first ?? t; last = t; }
     const id = o.message.id || o.uuid || `${seen.size}`;
-    seen.set(id, { model: o.message.model || 'unknown', u });
+    seen.set(id, { model: o.message.model || 'unknown', u, t });
   }
+  const compactions = boundaries || summaries;
   const s = sessions.get(sid) || { sid, files: 0, sub: 0, models: new Map(), requests: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0, maxCtx: 0, compactions: 0, first: null, last: null };
   s.files++; if (isSub) s.sub++;
   s.compactions += compactions;
   if (first && (!s.first || first < s.first)) s.first = first;
   if (last && (!s.last || last > s.last)) s.last = last;
-  for (const { model, u } of seen.values()) {
-    parsed++;
+  for (const { model, u, t } of seen.values()) {
     const inp = u.input_tokens || 0, cw = u.cache_creation_input_tokens || 0, cr = u.cache_read_input_tokens || 0, out = u.output_tokens || 0;
-    s.models.set(model, (s.models.get(model) || 0) + 1); s.requests++;
-    s.input += inp; s.cacheWrite += cw; s.cacheRead += cr; s.output += out;
-    s.maxCtx = Math.max(s.maxCtx, inp + cw + cr);
-    const m = byModel.get(model) || { model, requests: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
-    m.requests++; m.input += inp; m.cacheWrite += cw; m.cacheRead += cr; m.output += out;
-    byModel.set(model, m);
+    if (!t || t >= since) {
+      parsed++;
+      s.models.set(model, (s.models.get(model) || 0) + 1); s.requests++;
+      s.input += inp; s.cacheWrite += cw; s.cacheRead += cr; s.output += out;
+      s.maxCtx = Math.max(s.maxCtx, inp + cw + cr);
+      const m = byModel.get(model) || { model, requests: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
+      m.requests++; m.input += inp; m.cacheWrite += cw; m.cacheRead += cr; m.output += out;
+      byModel.set(model, m);
+    }
+    if (t && t >= resetTs) {
+      const w = byModelWeek.get(model) || { model, requests: 0, total: 0, output: 0 };
+      w.requests++; w.total += inp + cw + cr + out; w.output += out;
+      byModelWeek.set(model, w);
+    }
   }
   sessions.set(sid, s);
 }
+
+let snapshot = null;
+try { snapshot = JSON.parse(readFileSync(join(DATA, 'rate-limits.json'), 'utf8')); } catch { /* none yet */ }
 
 const rows = [...sessions.values()].filter(s => s.requests > 0)
   .map(s => ({ ...s, models: [...s.models.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]), total: s.input + s.cacheWrite + s.cacheRead + s.output, avgCtx: Math.round((s.input + s.cacheWrite + s.cacheRead) / s.requests) }))
   .sort((a, b) => b.total - a.total);
 
 if (JSON_OUT) {
-  console.log(JSON.stringify({ days: DAYS, project: PROJECT, filesScanned: files.length, requestsParsed: parsed, sessions: rows, byModel: [...byModel.values()] }, null, 2));
+  console.log(JSON.stringify({ days: DAYS, project: PROJECT, filesScanned: files.length, requestsParsed: parsed, weeklyResetUtc: new Date(resetTs).toISOString(), sinceWeeklyReset: [...byModelWeek.values()], planLimits: snapshot, sessions: rows, byModel: [...byModel.values()] }, null, 2));
   process.exit(0);
 }
 
 const k = n => n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n);
 const wat = t => t ? new Date(t).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-';
 const short = m => m.replace(/^claude-/, '').replace(/-\d{8}$/, '');
+const winLabel = key => key.replace('five_hour', '5h').replace('seven_day', '7d').replace(/_/g, ' ');
+const winRank = key => key.startsWith('five_hour') ? 0 : key.startsWith('seven_day') ? 1 : 2;
 
 console.log(`elisys-usage: last ${DAYS} days, project filter "${PROJECT}", ${files.length} transcript files, ${parsed} model responses parsed (times WAT)`);
 if (!parsed) { console.log('Nothing parsed. Either no sessions in the window, or the transcript format has changed.'); process.exit(0); }
+
+if (snapshot?.rate_limits && Object.keys(snapshot.rate_limits).length) {
+  console.log(`\nPlan limits (Claude Code's own figures, last seen ${snapshot.at})`);
+  for (const key of Object.keys(snapshot.rate_limits).sort((a, b) => winRank(a) - winRank(b) || a.localeCompare(b))) {
+    const v = snapshot.rate_limits[key]?.used_percentage;
+    if (v == null) continue;
+    const reset = snapshot.rate_limits[key]?.resets_at ? `, resets ${snapshot.rate_limits[key].resets_at}` : '';
+    console.log('  ' + winLabel(key).padEnd(16) + `${Math.round(v)}% used${reset}`);
+  }
+} else {
+  console.log('\nPlan limits: no snapshot yet. The status line writes one within a minute of your next Claude Code session on v1.0.2.');
+}
+
+console.log(`\nSince the weekly reset (Sunday 01:00 WAT, ${new Date(resetTs).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', month: 'short', day: '2-digit' })})`);
+console.log('model'.padEnd(18) + 'requests'.padStart(9) + 'total tokens'.padStart(14) + 'output'.padStart(9));
+for (const w of [...byModelWeek.values()].sort((a, b) => b.total - a.total)) {
+  console.log(short(w.model).padEnd(18) + String(w.requests).padStart(9) + k(w.total).padStart(14) + k(w.output).padStart(9));
+}
+
+const fableUsed = [...byModel.keys()].some(m => /fable|mythos/i.test(m));
+const fableWindow = snapshot && Object.keys(snapshot.rate_limits || {}).some(kk => /fable|mythos/i.test(kk));
+if (fableUsed && !fableWindow) {
+  console.log("Note: Claude Code's status feed reported no Fable-specific limit window in the last snapshot; the Fable rows above are measured from transcripts, and /usage inside Claude Code shows the official bar.");
+}
 
 console.log('\nBy model');
 console.log('model'.padEnd(18) + 'requests'.padStart(9) + 'cache read'.padStart(12) + 'cache write'.padStart(13) + 'fresh in'.padStart(10) + 'output'.padStart(9));
@@ -103,7 +152,7 @@ const all = rows.reduce((a, r) => ({ total: a.total + r.total, read: a.read + r.
 console.log(`\nAll sessions: ${k(all.total)} tokens over ${all.reqs} requests; average context per request ${k(Math.round(all.read / Math.max(1, all.reqs)))} read from cache.`);
 console.log('Reading it: a high "avg ctx" means every step re-sends a huge conversation. Lower it with /clear between orders, a smaller --autocompact window, and a lighter session gate.');
 
-const compLog = join(homedir(), '.claude', 'plugins', 'data', 'elisys-lean-skills-dir', 'compactions.jsonl');
+const compLog = join(DATA, 'compactions.jsonl');
 if (existsSync(compLog)) {
   const n = readFileSync(compLog, 'utf8').split('\n').filter(l => { try { return l && Date.parse(JSON.parse(l).at) >= since; } catch { return false; } }).length;
   console.log(`Compactions logged by the plugin in this window: ${n}`);

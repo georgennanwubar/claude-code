@@ -1,6 +1,13 @@
 #!/usr/bin/env node
-// elisys-lean status line: model·effort │ context tokens (colour by absolute size) │ 5h and 7d plan use │ cache.
-// Runs locally; consumes no API tokens.
+// elisys-lean status line: model·effort │ context tokens (colour by absolute size) │ EVERY plan window
+// Claude Code reports (5h, 7d, and any model-specific weekly window such as Fable's) │ cache.
+// v1.0.2: windows are read from the data, never from a hardcoded list, so a bucket Claude Code adds
+// can no longer be dropped. Each refresh also snapshots the windows to rate-limits.json (at most once
+// a minute) so elisys-usage can show them outside a session. Runs locally; consumes no API tokens.
+import { writeFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { dataDir, watParts } from './common.mjs';
+
 let raw = '';
 process.stdin.on('data', c => (raw += c));
 process.stdin.on('end', () => {
@@ -24,17 +31,27 @@ process.stdin.on('end', () => {
   }
 
   const rl = d.rate_limits || {};
-  const pc = (w, label) => {
-    const v = rl[w]?.used_percentage;
-    if (v == null) return;
+  const label = key => key.replace('five_hour', '5h').replace('seven_day', '7d').replace(/_/g, '·');
+  const rank = key => key.startsWith('five_hour') ? 0 : key.startsWith('seven_day') ? 1 : 2;
+  for (const key of Object.keys(rl).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) {
+    const v = rl[key]?.used_percentage;
+    if (v == null) continue;
     const col = v >= 85 ? R : v >= 60 ? Y : G;
-    parts.push(`${label} ${col}${Math.round(v)}%${X}`);
-  };
-  pc('five_hour', '5h');
-  pc('seven_day', '7d');
+    parts.push(`${label(key)} ${col}${Math.round(v)}%${X}`);
+  }
 
   const cache = d.prompt_cache;
   if (cache && cache.caching_observed) parts.push(cache.warm ? `${G}cache warm${X}` : `${Y}cache cold${X}`);
 
   process.stdout.write(parts.join(' │ ') + '\n');
+
+  // Snapshot the plan windows for elisys-usage. Fail open; never break the status line.
+  try {
+    if (Object.keys(rl).length) {
+      const f = join(dataDir(), 'rate-limits.json');
+      let stale = true;
+      try { stale = Date.now() - statSync(f).mtimeMs > 60e3; } catch { /* absent: write it */ }
+      if (stale) writeFileSync(f, JSON.stringify({ at: watParts().iso, model: d.model?.id || null, rate_limits: rl }) + '\n');
+    }
+  } catch { /* fail open */ }
 });

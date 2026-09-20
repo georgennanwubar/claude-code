@@ -42,14 +42,27 @@ node "$DEST/scripts/install-statusline.mjs"
 remove_rc_block
 cat >> "$RC" << 'RCEOF'
 # >>> elisys-lean launchers >>>
-# Pick the model per work order. --autocompact keeps each step from re-sending a near-1M-token conversation.
-elisys-build() { cd ~/projects/elisys && claude --model 'opus[1m]' --effort high --autocompact 350k "$@"; }
-elisys-docs()  { cd ~/projects/elisys && claude --model sonnet --effort medium --autocompact 350k "$@"; }
-elisys-deep()  { cd ~/projects/elisys && claude --model fable --effort high --autocompact 500k "$@"; }
+# `elisys` reads the queue and picks the model and effort itself (docs->sonnet,
+# build->opus, deep only when an order names it). `elisys build|docs|deep` overrides the pick. No
+# --autocompact cap: compaction happens only at Claude Code's default, near the window's end.
+# The three named launchers remain. Named subagents default to sonnet via CLAUDE_CODE_SUBAGENT_MODEL.
+elisys() {
+  local pick m e
+  pick="$(node ~/.claude/skills/elisys-lean/bin/elisys-pick "$@")" || pick=""
+  if [ -n "$pick" ]; then
+    read -r m e <<< "$pick"
+    cd ~/projects/elisys && CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model "$m" --effort "$e"
+  else
+    echo "elisys-pick failed; use elisys-build / elisys-docs / elisys-deep"
+  fi
+}
+elisys-build() { cd ~/projects/elisys && CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'opus[1m]' --effort high "$@"; }
+elisys-docs()  { cd ~/projects/elisys && CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model sonnet --effort medium "$@"; }
+elisys-deep()  { cd ~/projects/elisys && CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model fable --effort high "$@"; }
 alias elisys-usage='node ~/.claude/skills/elisys-lean/bin/elisys-usage'
 # <<< elisys-lean launchers <<<
 RCEOF
-echo "  launchers: elisys-build, elisys-docs, elisys-deep, elisys-usage added to ~/.bashrc"
+echo "  launchers: elisys (auto-pick), elisys-build, elisys-docs, elisys-deep, elisys-usage added to ~/.bashrc"
 
 if command -v claude >/dev/null; then
   echo "Validating plugin:"
@@ -63,6 +76,6 @@ cat << 'DONE'
 Done. Next:
   source ~/.bashrc
   elisys-usage --days 7        # free: reads local transcripts, no tokens spent
-  elisys-build                 # then /queue
+  elisys                       # picks the model from the queue; then /queue
 Inside Claude Code, /plugin should list elisys-lean@skills-dir as enabled.
 DONE
