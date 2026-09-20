@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+// elisys-usage: per-session token use from this machine's Claude Code transcripts.
+// Reads ~/.claude/projects/<dir matching --project>/**/*.jsonl. Prints counts only, never content.
+// The transcript format is internal to Claude Code and can change; this tool reports what it can parse
+// and says so when it parses nothing.
+//
+//   elisys-usage [--days 7] [--project elisys] [--top 15] [--json]
+import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
+import { join, basename } from 'node:path';
+import { homedir } from 'node:os';
+
+const args = process.argv.slice(2);
+const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : d; };
+const DAYS = Number(opt('days', 7));
+const PROJECT = String(opt('project', 'elisys')).toLowerCase();
+const TOP = Number(opt('top', 15));
+const JSON_OUT = args.includes('--json');
+const ROOT = opt('root', join(homedir(), '.claude', 'projects'));
+const since = Date.now() - DAYS * 86400e3;
+
+function walk(dir, out = []) {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    const s = statSync(p);
+    if (s.isDirectory()) walk(p, out);
+    else if (name.endsWith('.jsonl') && s.mtimeMs >= since) out.push(p);
+  }
+  return out;
+}
+
+if (!existsSync(ROOT)) { console.log(`No transcript folder at ${ROOT}`); process.exit(0); }
+const projectDirs = readdirSync(ROOT).filter(n => n.toLowerCase().includes(PROJECT)).map(n => join(ROOT, n));
+const files = projectDirs.flatMap(d => walk(d));
+
+const sessions = new Map();
+const byModel = new Map();
+let parsed = 0;
+
+for (const f of files) {
+  const isSub = f.includes(`${'/'}subagents${'/'}`) || basename(f).startsWith('agent-');
+  const seen = new Map(); // message id -> usage (last write wins; one message can span several lines)
+  let sid = basename(f, '.jsonl'), compactions = 0, first = null, last = null;
+  for (const line of readFileSync(f, 'utf8').split('\n')) {
+    if (!line) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (o.sessionId) sid = o.sessionId; // subagent transcripts carry the parent session id, so they roll up
+    if (o.subtype === 'compact_boundary' || o.isCompactSummary === true) compactions++;
+    const u = o.message?.usage;
+    if (!u || o.type !== 'assistant') continue;
+    const t = Date.parse(o.timestamp || '') || null;
+    if (t && t < since) continue;
+    if (t) { first = first ?? t; last = t; }
+    const id = o.message.id || o.uuid || `${seen.size}`;
+    seen.set(id, { model: o.message.model || 'unknown', u });
+  }
+  const s = sessions.get(sid) || { sid, files: 0, sub: 0, models: new Map(), requests: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0, maxCtx: 0, compactions: 0, first: null, last: null };
+  s.files++; if (isSub) s.sub++;
+  s.compactions += compactions;
+  if (first && (!s.first || first < s.first)) s.first = first;
+  if (last && (!s.last || last > s.last)) s.last = last;
+  for (const { model, u } of seen.values()) {
+    parsed++;
+    const inp = u.input_tokens || 0, cw = u.cache_creation_input_tokens || 0, cr = u.cache_read_input_tokens || 0, out = u.output_tokens || 0;
+    s.models.set(model, (s.models.get(model) || 0) + 1); s.requests++;
+    s.input += inp; s.cacheWrite += cw; s.cacheRead += cr; s.output += out;
+    s.maxCtx = Math.max(s.maxCtx, inp + cw + cr);
+    const m = byModel.get(model) || { model, requests: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
+    m.requests++; m.input += inp; m.cacheWrite += cw; m.cacheRead += cr; m.output += out;
+    byModel.set(model, m);
+  }
+  sessions.set(sid, s);
+}
+
+const rows = [...sessions.values()].filter(s => s.requests > 0)
+  .map(s => ({ ...s, models: [...s.models.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]), total: s.input + s.cacheWrite + s.cacheRead + s.output, avgCtx: Math.round((s.input + s.cacheWrite + s.cacheRead) / s.requests) }))
+  .sort((a, b) => b.total - a.total);
+
+if (JSON_OUT) {
+  console.log(JSON.stringify({ days: DAYS, project: PROJECT, filesScanned: files.length, requestsParsed: parsed, sessions: rows, byModel: [...byModel.values()] }, null, 2));
+  process.exit(0);
+}
+
+const k = n => n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n);
+const wat = t => t ? new Date(t).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-';
+const short = m => m.replace(/^claude-/, '').replace(/-\d{8}$/, '');
+
+console.log(`elisys-usage: last ${DAYS} days, project filter "${PROJECT}", ${files.length} transcript files, ${parsed} model responses parsed (times WAT)`);
+if (!parsed) { console.log('Nothing parsed. Either no sessions in the window, or the transcript format has changed.'); process.exit(0); }
+
+console.log('\nBy model');
+console.log('model'.padEnd(18) + 'requests'.padStart(9) + 'cache read'.padStart(12) + 'cache write'.padStart(13) + 'fresh in'.padStart(10) + 'output'.padStart(9));
+for (const m of [...byModel.values()].sort((a, b) => b.cacheRead - a.cacheRead)) {
+  console.log(short(m.model).padEnd(18) + String(m.requests).padStart(9) + k(m.cacheRead).padStart(12) + k(m.cacheWrite).padStart(13) + k(m.input).padStart(10) + k(m.output).padStart(9));
+}
+
+console.log(`\nTop ${Math.min(TOP, rows.length)} sessions by total tokens`);
+console.log('started'.padEnd(15) + 'session'.padEnd(10) + 'model'.padEnd(16) + 'reqs'.padStart(6) + 'avg ctx'.padStart(9) + 'max ctx'.padStart(9) + 'total'.padStart(9) + 'output'.padStart(8) + 'compact'.padStart(8) + 'subagents'.padStart(10));
+for (const r of rows.slice(0, TOP)) {
+  console.log(wat(r.first).padEnd(15) + r.sid.slice(0, 8).padEnd(10) + short(r.models[0] || '?').slice(0, 15).padEnd(16) + String(r.requests).padStart(6) + k(r.avgCtx).padStart(9) + k(r.maxCtx).padStart(9) + k(r.total).padStart(9) + k(r.output).padStart(8) + String(r.compactions).padStart(8) + String(r.sub).padStart(10));
+}
+
+const all = rows.reduce((a, r) => ({ total: a.total + r.total, read: a.read + r.cacheRead, reqs: a.reqs + r.requests }), { total: 0, read: 0, reqs: 0 });
+console.log(`\nAll sessions: ${k(all.total)} tokens over ${all.reqs} requests; average context per request ${k(Math.round(all.read / Math.max(1, all.reqs)))} read from cache.`);
+console.log('Reading it: a high "avg ctx" means every step re-sends a huge conversation. Lower it with /clear between orders, a smaller --autocompact window, and a lighter session gate.');
+
+const compLog = join(homedir(), '.claude', 'plugins', 'data', 'elisys-lean-skills-dir', 'compactions.jsonl');
+if (existsSync(compLog)) {
+  const n = readFileSync(compLog, 'utf8').split('\n').filter(l => { try { return l && Date.parse(JSON.parse(l).at) >= since; } catch { return false; } }).length;
+  console.log(`Compactions logged by the plugin in this window: ${n}`);
+}

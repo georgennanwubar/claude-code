@@ -1,0 +1,9 @@
+{
+  "name": "elisys-lean",
+  "displayName": "Elisys Lean",
+  "version": "1.0.0",
+  "description": "Cuts Claude Code token burn on the Elisys monorepo: digests long build and test output, logs compactions, shows a context and plan-usage status line, and reports per-session token use from local transcripts.",
+  "author": { "name": "George Nnanwubar", "url": "https://elisys.app" },
+  "license": "UNLICENSED",
+  "keywords": ["tokens", "context", "usage", "elisys"]
+}
