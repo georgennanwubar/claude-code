@@ -15,7 +15,7 @@ written into the repository, so no governed path is touched and no PR is needed.
 | `elisys-usage` | Reads local transcripts and prints tokens per session and per model, average context per request, compactions and subagents. Counts only. | Free: runs in your shell, not in Claude |
 | `/elisys-lean:handoff` | Appends a short HANDOFF block to the session log after an order closes, so the next order can start fresh. | Avoids carrying one order's context into the next |
 | `/elisys-lean:usage-report` | Asks Claude to run `elisys-usage` and name the biggest driver. You invoke it; Claude never auto-loads it. | – |
-| Launchers in `~/.bashrc` | `elisys-build` (Opus 5, high), `elisys-docs` (Sonnet 5, medium), `elisys-deep` (Fable 5.1, high), each with a smaller auto-compact window. | Model and context size are the two largest levers |
+| Launchers in `~/.bashrc` | `elisys-build` (Opus 5 with the 1M window, high), `elisys-docs` (Sonnet 5, medium), `elisys-deep` (Fable 5.1, high), each with a smaller auto-compact window. | Model and context size are the two largest levers |
 
 ## Safety properties
 

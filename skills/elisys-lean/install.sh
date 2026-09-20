@@ -43,7 +43,7 @@ remove_rc_block
 cat >> "$RC" << 'RCEOF'
 # >>> elisys-lean launchers >>>
 # Pick the model per work order. --autocompact keeps each step from re-sending a near-1M-token conversation.
-elisys-build() { cd ~/projects/elisys && claude --model opus --effort high --autocompact 350k "$@"; }
+elisys-build() { cd ~/projects/elisys && claude --model 'opus[1m]' --effort high --autocompact 350k "$@"; }
 elisys-docs()  { cd ~/projects/elisys && claude --model sonnet --effort medium --autocompact 350k "$@"; }
 elisys-deep()  { cd ~/projects/elisys && claude --model fable --effort high --autocompact 500k "$@"; }
 alias elisys-usage='node ~/.claude/skills/elisys-lean/bin/elisys-usage'
