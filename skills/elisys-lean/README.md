@@ -11,7 +11,7 @@ written into the repository, so no governed path is touched and no PR is needed.
 | Output digest (PostToolUse on Bash) | A long successful result from pnpm, vitest, turbo, tsc, eslint, prisma, docker, terraform, gcloud or k6 is saved to a log file. Claude sees the first 15 lines, every failure and summary line, the last 30 lines and the log path. | A 30k-character test run becomes about 3–5k, and it stays out of every later step of the session |
 | Session note (SessionStart) | One short paragraph telling the session how digests work. Also deletes digest logs older than 7 days. | Small cost, about 80 tokens |
 | Compaction log (PreCompact) | One line per compaction in `compactions.jsonl`, so you can count them. | Measurement only |
-| Status line | `Opus·high │ ctx 312k/1M ██░░ │ 5h 22% │ 7d 64% │ 7d·fable 41% │ cache warm`. Every plan window Claude Code reports is shown, model-specific weekly windows included. Context turns yellow at 250k and red at 400k. | Lets you see a bloated session before it eats the week |
+| Status line | `Opus·high │ ctx 312k/1M ██░░ │ 5h 22% │ 7d·other 64% │ 7d·fable 35%(2h) │ cache warm`. Both weekly gauges of a Max account: the live one for this session's model family, and the last-seen one for the other family with its age. Context turns yellow at 250k and red at 400k. | Lets you see a bloated session before it eats the week |
 | `elisys-usage` | Reads local transcripts and prints plan-limit percentages (from the status line's snapshot), per-model usage since the weekly reset (Sunday 01:00 WAT), tokens per session and per model, average context per request, compactions and subagents. Counts only. | Free: runs in your shell, not in Claude |
 | `/elisys-lean:handoff` | Appends a short HANDOFF block to the session log after an order closes, so the next order can start fresh. | Avoids carrying one order's context into the next |
 | `/elisys-lean:usage-report` | Asks Claude to run `elisys-usage` and name the biggest driver. You invoke it; Claude never auto-loads it. | – |
@@ -39,6 +39,15 @@ If you already had a status line, the installer leaves it alone. To use this one
 `statusLine.command` in `~/.claude/settings.json` to `node ~/.claude/skills/elisys-lean/scripts/statusline.mjs`.
 
 ## Changes
+
+- **1.1.2 (21 Sep 2026).** Both weekly gauges on the status line. Measured on George's account:
+  Claude Code's status feed carries one `seven_day` window, scoped to the model family the
+  session runs on (a Fable session reports Fable's weekly; Opus/Sonnet sessions report the
+  other). The status line now keeps a snapshot per family (`rate-limits-fable.json`,
+  `rate-limits-other.json`) and shows the live gauge plus the other family's last-seen gauge
+  with its age. `elisys-usage` prints both under Plan limits with reset times in WAT.
+  `ELISYS_LEAN_SCOPED_7D=0` turns the split off if `/usage` ever shows the feed is not
+  model-scoped.
 
 - **1.1.1 (20 Sep 2026).** The `--autocompact 350k`/`500k` caps are removed from every launcher.
   They sat below the session gate's own read size (Tier 1 plus a Tier 2 read set is over 1.2 MB),

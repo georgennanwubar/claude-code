@@ -93,6 +93,12 @@ for (const f of files) {
 
 let snapshot = null;
 try { snapshot = JSON.parse(readFileSync(join(DATA, 'rate-limits.json'), 'utf8')); } catch { /* none yet */ }
+// v1.1.2: one snapshot per model family, because Claude Code's feed reports the weekly window of
+// the model the session runs on. Both gauges of a Max account are therefore visible here.
+const famSnap = {};
+for (const fam of ['fable', 'other']) {
+  try { famSnap[fam] = JSON.parse(readFileSync(join(DATA, `rate-limits-${fam}.json`), 'utf8')); } catch { /* not seen yet */ }
+}
 
 const rows = [...sessions.values()].filter(s => s.requests > 0)
   .map(s => ({ ...s, models: [...s.models.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]), total: s.input + s.cacheWrite + s.cacheRead + s.output, avgCtx: Math.round((s.input + s.cacheWrite + s.cacheRead) / s.requests) }))
@@ -112,16 +118,28 @@ const winRank = key => key.startsWith('five_hour') ? 0 : key.startsWith('seven_d
 console.log(`elisys-usage: last ${DAYS} days, project filter "${PROJECT}", ${files.length} transcript files, ${parsed} model responses parsed (times WAT)`);
 if (!parsed) { console.log('Nothing parsed. Either no sessions in the window, or the transcript format has changed.'); process.exit(0); }
 
-if (snapshot?.rate_limits && Object.keys(snapshot.rate_limits).length) {
-  console.log(`\nPlan limits (Claude Code's own figures, last seen ${snapshot.at})`);
+const fmtReset = r => (typeof r === 'number' ? new Date(r * 1000).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' WAT' : String(r));
+if (famSnap.fable || famSnap.other) {
+  console.log('\nPlan limits (Claude Code\'s own figures; one weekly gauge per model family)');
+  for (const [fam, title] of [['fable', 'Fable 5 weekly'], ['other', 'Other models weekly']]) {
+    const sn = famSnap[fam];
+    const v = sn?.rate_limits?.seven_day?.used_percentage;
+    if (v == null) { console.log('  ' + title.padEnd(22) + 'not seen yet (run one session on that family)'); continue; }
+    const r = sn.rate_limits.seven_day.resets_at ? `, resets ${fmtReset(sn.rate_limits.seven_day.resets_at)}` : '';
+    console.log('  ' + title.padEnd(22) + `${Math.round(v)}% used${r}  (seen ${sn.at})`);
+  }
+  const newest = [famSnap.fable, famSnap.other].filter(Boolean).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+  const fh = newest?.rate_limits?.five_hour?.used_percentage;
+  if (fh != null) console.log('  ' + '5-hour window'.padEnd(22) + `${Math.round(fh)}% used  (seen ${newest.at})`);
+} else if (snapshot?.rate_limits && Object.keys(snapshot.rate_limits).length) {
+  console.log(`\nPlan limits (Claude Code's own figures, last seen ${snapshot.at}; pre-1.1.2 snapshot, single gauge)`);
   for (const key of Object.keys(snapshot.rate_limits).sort((a, b) => winRank(a) - winRank(b) || a.localeCompare(b))) {
     const v = snapshot.rate_limits[key]?.used_percentage;
     if (v == null) continue;
-    const reset = snapshot.rate_limits[key]?.resets_at ? `, resets ${snapshot.rate_limits[key].resets_at}` : '';
-    console.log('  ' + winLabel(key).padEnd(16) + `${Math.round(v)}% used${reset}`);
+    console.log('  ' + winLabel(key).padEnd(16) + `${Math.round(v)}% used`);
   }
 } else {
-  console.log('\nPlan limits: no snapshot yet. The status line writes one within a minute of your next Claude Code session on v1.0.2.');
+  console.log('\nPlan limits: no snapshot yet. The status line writes one within a minute of your next Claude Code session.');
 }
 
 console.log(`\nSince the weekly reset (Sunday 01:00 WAT, ${new Date(resetTs).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', month: 'short', day: '2-digit' })})`);
@@ -131,9 +149,8 @@ for (const w of [...byModelWeek.values()].sort((a, b) => b.total - a.total)) {
 }
 
 const fableUsed = [...byModel.keys()].some(m => /fable|mythos/i.test(m));
-const fableWindow = snapshot && Object.keys(snapshot.rate_limits || {}).some(kk => /fable|mythos/i.test(kk));
-if (fableUsed && !fableWindow) {
-  console.log("Note: Claude Code's status feed reported no Fable-specific limit window in the last snapshot; the Fable rows above are measured from transcripts, and /usage inside Claude Code shows the official bar.");
+if (fableUsed && !famSnap.fable) {
+  console.log("Note: no Fable weekly gauge seen yet; it is captured the first time a Fable session renders the status line on v1.1.2. The Fable rows above are measured from transcripts; /usage inside Claude Code shows the official bar.");
 }
 
 console.log('\nBy model');
