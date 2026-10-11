@@ -42,27 +42,21 @@ node "$DEST/scripts/install-statusline.mjs"
 remove_rc_block
 cat >> "$RC" << 'RCEOF'
 # >>> elisys-lean launchers >>>
-# `elisys` reads the queue and picks the model and effort itself (docs->sonnet,
-# build->opus, deep only when an order names it). `elisys build|docs|deep` overrides the pick. No
-# --autocompact cap: compaction happens only at Claude Code's default, near the window's end.
-# The three named launchers remain. Named subagents default to sonnet via CLAUDE_CODE_SUBAGENT_MODEL.
-elisys() {
-  local pick m e
-  pick="$(node ~/.claude/skills/elisys-lean/bin/elisys-pick "$@")" || pick=""
-  if [ -n "$pick" ]; then
-    read -r m e <<< "$pick"
-    cd ~/projects/elisys && CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model "$m" --effort "$e"
-  else
-    echo "elisys-pick failed; use elisys-build / elisys-docs / elisys-deep"
-  fi
-}
-elisys-build() { cd ~/projects/elisys && CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'opus[1m]' --effort high "$@"; }
-elisys-docs()  { cd ~/projects/elisys && CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model sonnet --effort medium "$@"; }
-elisys-deep()  { cd ~/projects/elisys && CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model fable --effort high "$@"; }
+# `elisys` is the everyday launcher: a dispatcher session on Sonnet 1M at high effort
+# (ELISYS_LAUNCH=dispatch). It no longer reads the queue to choose a model. The other three are
+# manual overrides: elisys-build (Opus 1M, high), elisys-docs (Sonnet, medium) and elisys-deep
+# (Fable, high; pinned to claude-fable-5-1 by ANTHROPIC_DEFAULT_FABLE_MODEL in settings.json).
+# Each sets ELISYS_LAUNCH to build, docs or deep. No --autocompact cap: compaction happens only at
+# Claude Code's default, near the window's end. Named subagents default to sonnet via
+# CLAUDE_CODE_SUBAGENT_MODEL.
+elisys()       { cd ~/projects/elisys && ELISYS_LAUNCH=dispatch CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'sonnet[1m]' --effort high "$@"; }
+elisys-build() { cd ~/projects/elisys && ELISYS_LAUNCH=build CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'opus[1m]' --effort high "$@"; }
+elisys-docs()  { cd ~/projects/elisys && ELISYS_LAUNCH=docs CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model sonnet --effort medium "$@"; }
+elisys-deep()  { cd ~/projects/elisys && ELISYS_LAUNCH=deep CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model fable --effort high "$@"; }
 alias elisys-usage='node ~/.claude/skills/elisys-lean/bin/elisys-usage'
 # <<< elisys-lean launchers <<<
 RCEOF
-echo "  launchers: elisys (auto-pick), elisys-build, elisys-docs, elisys-deep, elisys-usage added to ~/.bashrc"
+echo "  launchers: elisys (dispatcher, Sonnet 1M high), elisys-build, elisys-docs, elisys-deep, elisys-usage added to ~/.bashrc"
 
 if command -v claude >/dev/null; then
   echo "Validating plugin:"
@@ -76,6 +70,6 @@ cat << 'DONE'
 Done. Next:
   source ~/.bashrc
   elisys-usage --days 7        # free: reads local transcripts, no tokens spent
-  elisys                       # picks the model from the queue; then /queue
+  elisys                       # dispatcher on Sonnet 1M, high effort; then /queue
 Inside Claude Code, /plugin should list elisys-lean@skills-dir as enabled.
 DONE

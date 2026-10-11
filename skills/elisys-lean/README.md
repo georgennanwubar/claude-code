@@ -15,7 +15,7 @@ written into the repository, so no governed path is touched and no PR is needed.
 | `elisys-usage` | Reads local transcripts and prints plan-limit percentages (from the status line's snapshot), per-model usage since the weekly reset (Sunday 01:00 WAT), tokens per session and per model, average context per request, compactions and subagents. Counts only. | Free: runs in your shell, not in Claude |
 | `/elisys-lean:handoff` | Appends a short HANDOFF block to the session log after an order closes, so the next order can start fresh. | Avoids carrying one order's context into the next |
 | `/elisys-lean:usage-report` | Asks Claude to run `elisys-usage` and name the biggest driver. You invoke it; Claude never auto-loads it. | – |
-| Launchers in `~/.bashrc` | `elisys` reads the queue, classifies the waiting orders (docs → Sonnet 5 medium, build → Opus 5 high, deep → Fable 5.1 high, only when an order names it) and launches with the right model and effort; `elisys build\|docs\|deep` overrides; `elisys-build`, `elisys-docs`, `elisys-deep` remain for explicit choice. Every launcher sets `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, so a subagent George names runs cheap unless its own definition says otherwise. | Model choice, made from the work itself |
+| Launchers in `~/.bashrc` | `elisys` is the everyday dispatcher: Sonnet 1M (`sonnet[1m]`) at high effort, `ELISYS_LAUNCH=dispatch`, no queue read. `elisys-build` (Opus 1M, high), `elisys-docs` (Sonnet, medium) and `elisys-deep` (Fable, high) are manual overrides and set `ELISYS_LAUNCH` to build, docs or deep. Every launcher sets `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, so a subagent George names runs cheap unless its own definition says otherwise. | Model choice is George's, made at the launch |
 
 ## Safety properties
 
@@ -39,6 +39,8 @@ If you already had a status line, the installer leaves it alone. To use this one
 `statusLine.command` in `~/.claude/settings.json` to `node ~/.claude/skills/elisys-lean/scripts/statusline.mjs`.
 
 ## Changes
+
+- **1.1.3 (11 Oct 2026).** `elisys` becomes a dispatcher: it always launches `sonnet[1m]` at high effort with `ELISYS_LAUNCH=dispatch` and no longer reads the queue to choose a model. `bin/elisys-pick` is reduced to that one fixed answer (same `MODEL EFFORT` stdout contract) and kept in place. `elisys-build`, `elisys-docs` and `elisys-deep` stay as manual overrides and now set `ELISYS_LAUNCH` to build, docs or deep. `install.sh` writes the same block.
 
 - **1.1.2 (21 Sep 2026).** Both weekly gauges on the status line. Measured on George's account:
   Claude Code's status feed carries one `seven_day` window, scoped to the model family the
