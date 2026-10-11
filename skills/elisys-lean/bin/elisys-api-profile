@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# elisys-api-profile (elisys-lean v1.1.4): create or refresh the second Claude Code profile that
+# `elisys-api` launches with, ~/.claude-api. Idempotent. Safe to run any time, and the launcher runs
+# it on every start so the profile cannot drift.
+#
+# What it does and does not do:
+#   - SIGN-IN IS SEPARATE. It never links, copies or creates a credential or auth file
+#     (.credentials.json, .claude.json, the API key file). Those names are on a hard refusal list.
+#   - Shared by symlink (read-mostly, no session writes through them): skills/, CLAUDE.md, agents/,
+#     commands/ (the last two only if they exist), and the per-project auto-memory folder
+#     projects/<slug>/memory.
+#   - Shared by COPY, refreshed from ~/.claude on every run: settings.json, settings.local.json,
+#     keybindings.json. Not a symlink, because Claude Code writes settings.json itself (effortLevel,
+#     modelSettings), so a link would let a /model or /effort change in an API session rewrite the
+#     everyday profile's file. Edit ~/.claude/settings.json; the next elisys-api start copies it.
+#   - Everything else in ~/.claude (history, sessions, transcripts, caches, plugins/, backups,
+#     shell snapshots, the git repo) stays separate.
+# Usage: elisys-api-profile [-v|--verbose]
+# Test overrides: ELISYS_MAIN_CONFIG, ELISYS_API_PROFILE, ELISYS_PROJECT_DIR.
+set -euo pipefail
+
+MAIN="${ELISYS_MAIN_CONFIG:-$HOME/.claude}"
+API="${ELISYS_API_PROFILE:-$HOME/.claude-api}"
+PROJECT_DIR="${ELISYS_PROJECT_DIR:-$HOME/projects/elisys}"
+VERBOSE=0
+case "${1:-}" in -v|--verbose) VERBOSE=1 ;; "") ;; *) echo "usage: elisys-api-profile [-v|--verbose]" >&2; exit 2 ;; esac
+
+say() { [ "$VERBOSE" = 1 ] && printf '  %s\n' "$*" || true; }
+die() { printf 'elisys-api-profile: %s\n' "$*" >&2; exit 1; }
+
+[ -d "$MAIN" ] || die "$MAIN does not exist; run the everyday launcher once first."
+
+# Names that carry sign-in or key material. Never linked, never copied, whatever the lists below say.
+refuse_credential() {
+  case "$1" in
+    .credentials.json|.claude.json|*credentials*|*.env|anthropic-api*|*apikey*|*api-key*|*token*)
+      die "refusing to share '$1': it looks like a credential" ;;
+  esac
+}
+
+mkdir -p "$API"
+chmod 700 "$API"
+
+# link SRC DST: DST becomes a symlink to SRC. Skips a missing SRC; never overwrites a real file or dir.
+link() {
+  local src="$1" dst="$2"
+  refuse_credential "$(basename "$src")"; refuse_credential "$(basename "$dst")"
+  [ -e "$src" ] || { say "skip   $(basename "$dst")  (absent in $MAIN)"; return 0; }
+  if [ -L "$dst" ]; then
+    if [ "$(readlink "$dst")" = "$src" ]; then say "linked $dst"; return 0; fi
+    ln -sfn "$src" "$dst"; say "relink $dst -> $src"; return 0
+  fi
+  if [ -e "$dst" ]; then
+    printf 'elisys-api-profile: %s is a real file or folder, left alone (remove it to link it)\n' "$dst" >&2
+    return 0
+  fi
+  ln -s "$src" "$dst"; say "link   $dst -> $src"
+}
+
+# sync SRC DST: DST becomes a regular-file copy of SRC, refreshed when they differ.
+sync_copy() {
+  local src="$1" dst="$2"
+  refuse_credential "$(basename "$src")"
+  [ -f "$src" ] || { say "skip   $(basename "$dst")  (absent in $MAIN)"; return 0; }
+  if [ ! -L "$dst" ] && [ -f "$dst" ] && cmp -s "$src" "$dst"; then say "synced $dst (unchanged)"; return 0; fi
+  cp --remove-destination "$src" "$dst"; say "copy   $dst  (from $src)"
+}
+
+for d in skills agents commands; do link "$MAIN/$d" "$API/$d"; done
+link "$MAIN/CLAUDE.md" "$API/CLAUDE.md"
+for f in settings.json settings.local.json keybindings.json; do sync_copy "$MAIN/$f" "$API/$f"; done
+
+# Auto-memory: only the memory folder of the Elisys project is shared, so transcripts stay in each
+# profile's own projects/ folder and elisys-usage can tell the two apart.
+SLUG="$(readlink -f "$PROJECT_DIR" 2>/dev/null | sed 's/[^A-Za-z0-9]/-/g')"
+if [ -n "$SLUG" ]; then
+  mkdir -p "$API/projects/$SLUG"
+  link "$MAIN/projects/$SLUG/memory" "$API/projects/$SLUG/memory"
+fi
+exit 0

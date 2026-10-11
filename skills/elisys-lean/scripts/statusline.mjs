@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// elisys-lean status line: model·effort │ context tokens │ plan windows │ cache.
+// elisys-lean status line: model·effort │ context tokens │ [API cost] │ plan windows │ cache.
 // v1.1.2: Claude Code's feed carries ONE weekly window, but a Max account has two weekly
 // gauges (Fable, and every other model). Measured 2026-09-21: the feed's seven_day is scoped to
 // the model the session runs on. So the status line keeps a snapshot per model family and shows
@@ -37,6 +37,20 @@ process.stdin.on('end', () => {
     const pct = Math.min(100, Math.round((used / size) * 100));
     const filled = Math.round(pct / 10);
     parts.push(`ctx ${c}${k(used)}${X}/${k(size)} ${c}${'█'.repeat(filled)}${D}${'░'.repeat(10 - filled)}${X}`);
+  }
+
+  // v1.1.4: an `elisys-api` session is billed per token, and Claude Code enforces its budget flag
+  // only with --print, so this is the interactive guard: the session's running cost against
+  // ELISYS_API_BUDGET_USD (default 20), yellow from 80%, red at or over. Shown only for ELISYS_LAUNCH=api.
+  if (process.env.ELISYS_LAUNCH === 'api') {
+    const cap = Number(process.env.ELISYS_API_BUDGET_USD) > 0 ? Number(process.env.ELISYS_API_BUDGET_USD) : 20;
+    const cost = d.cost?.total_cost_usd;
+    if (typeof cost === 'number') {
+      const c = cost >= cap ? R : cost >= 0.8 * cap ? Y : G;
+      parts.push(`API ${c}$${cost.toFixed(2)}${X}/$${cap}${cost >= cap ? ` ${R}OVER BUDGET${X}` : ''}`);
+    } else {
+      parts.push(`API cost n/a/$${cap}`);
+    }
   }
 
   // Every window in the feed, data-driven. The weekly one is labelled by this session's family.
