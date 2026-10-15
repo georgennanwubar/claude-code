@@ -56,11 +56,39 @@ cat >> "$RC" << 'RCEOF'
 # permission bits). It exists only in the launched claude process's environment: never in this
 # shell, never in an argument, never printed. ELISYS_API_BUDGET_USD (default 20) is the session
 # budget the status line measures cost against; Claude Code enforces a budget flag only with -p.
-elisys()       { cd ~/projects/elisys && ELISYS_LAUNCH=dispatch CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'sonnet[1m]' --effort high "$@"; }
-elisys-build() { cd ~/projects/elisys && ELISYS_LAUNCH=build CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'opus[1m]' --effort high "$@"; }
-elisys-docs()  { cd ~/projects/elisys && ELISYS_LAUNCH=docs CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model sonnet --effort medium "$@"; }
-elisys-deep()  { cd ~/projects/elisys && ELISYS_LAUNCH=deep CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model fable --effort high "$@"; }
-elisys-api() (
+# Since v1.1.5 every launcher starts Claude Code inside a named tmux session when it is not already
+# inside tmux: the session is elisys-${ELISYS_LANE:-1} (lane 1 is elisys-1, ELISYS_LANE=2 is
+# elisys-2), `tmux new-session -A` reattaches to a running one instead of starting a second Claude,
+# inside tmux the launcher starts directly, and ELISYS_NO_TMUX=1 skips tmux. The model, effort and
+# ELISYS_LAUNCH each launcher sets are unchanged. The command runs in an interactive bash in the pane
+# so ~/.bashrc loads there and a secret (the API key) is read INSIDE the pane and never put in an
+# argument; a non-zero exit waits for Enter so an error message is not lost when the pane closes.
+_elisys_tmux() {
+  local fn="$1"; shift
+  if [ -n "${TMUX:-}" ] || [ "${ELISYS_NO_TMUX:-}" = 1 ]; then "$fn" "$@"; return; fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    printf 'elisys: tmux is not installed, so this starts without it. Install it with: sudo apt install tmux\n' >&2
+    "$fn" "$@"; return
+  fi
+  # A pane started by an already-running tmux server does not inherit this shell's variables, so
+  # every exported ELISYS_* setting (ELISYS_LANE, ELISYS_API_KEYFILE, ELISYS_API_BUDGET_USD...) is
+  # passed explicitly with -e. They are configuration, never secrets: the API key is not an ELISYS_*
+  # variable and is read inside the pane from its key file.
+  local -a fwd=(); local v
+  while IFS= read -r v; do fwd+=(-e "$v=${!v}"); done < <(compgen -e | grep '^ELISYS_' | grep -v '^ELISYS_NO_TMUX$')
+  tmux new-session -A -s "elisys-${ELISYS_LANE:-1}" -c "$HOME/projects/elisys" "${fwd[@]}" \
+    bash -ic 'export ELISYS_NO_TMUX=1; "$@"; rc=$?; if [ "$rc" -ne 0 ]; then printf "\nexited with status %s; press Enter to close this tmux session\n" "$rc"; read -r _; fi; exit "$rc"' _ "$fn" "$@"
+}
+_elisys_run_dispatch() { cd ~/projects/elisys && ELISYS_LAUNCH=dispatch CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'sonnet[1m]' --effort high "$@"; }
+_elisys_run_build()    { cd ~/projects/elisys && ELISYS_LAUNCH=build CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'opus[1m]' --effort high "$@"; }
+_elisys_run_docs()     { cd ~/projects/elisys && ELISYS_LAUNCH=docs CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model sonnet --effort medium "$@"; }
+_elisys_run_deep()     { cd ~/projects/elisys && ELISYS_LAUNCH=deep CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model fable --effort high "$@"; }
+elisys()       { _elisys_tmux _elisys_run_dispatch "$@"; }
+elisys-build() { _elisys_tmux _elisys_run_build "$@"; }
+elisys-docs()  { _elisys_tmux _elisys_run_docs "$@"; }
+elisys-deep()  { _elisys_tmux _elisys_run_deep "$@"; }
+elisys-api()   { _elisys_tmux _elisys_run_api "$@"; }
+_elisys_run_api() (
   set +x
   fail() { printf 'elisys-api: %s\n' "$*" >&2; exit 1; }
   keyfile="${ELISYS_API_KEYFILE:-$HOME/.config/elisys/anthropic-api.env}"
