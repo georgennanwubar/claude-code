@@ -63,6 +63,23 @@ cat >> "$RC" << 'RCEOF'
 # ELISYS_LAUNCH each launcher sets are unchanged. The command runs in an interactive bash in the pane
 # so ~/.bashrc loads there and a secret (the API key) is read INSIDE the pane and never put in an
 # argument; a non-zero exit waits for Enter so an error message is not lost when the pane closes.
+# Since v1.1.6 (order 266, ELISYS-717) every launcher names its lane, because two lanes share the one
+# checkout and `node tools/lanes.mjs` refuses to sweep, claim or make a worktree with ELISYS_LANE
+# unset. Lane 1 (elisys, elisys-build, elisys-docs, elisys-deep, elisys-api) runs with ELISYS_LANE=1
+# on its usual profile. Lane 2 (elisys2, elisys2-build, elisys2-docs) runs with ELISYS_LANE=2 on its
+# own folder, ~/.claude-lane2, in the tmux session elisys-2. George's rulings of 18 October 2026
+# (registers §164.1, 4 and 5): bin/elisys-lane-profile LINKS lane 2's shared items to ~/.claude
+# (settings.json, CLAUDE.md, skills, commands, agents, plugins, keybindings.json, output-styles) and
+# the Elisys project's memory notes only (projects/<slug>/memory), never copies them, never links a
+# sign-in, .claude.json or history, and never writes into ~/.claude; lane 2 signs in once with its
+# own account. MCP servers are added in each lane (`claude mcp add` writes that account's
+# .claude.json). `node tools/lanes.mjs status` reports a shared item that is a copy, not a link.
+# Both lanes start in ~/projects/elisys, the main checkout; each order is worked in the lane's own
+# worktree (node tools/lanes.mjs worktree new). The lane is set before tmux, so the session name
+# follows it, and read again inside the pane, so a pane a running tmux server starts keeps it;
+# CLAUDE_CONFIG_DIR is derived from the lane inside the pane, because tmux forwards only ELISYS_*.
+# Each run function is a subshell, so a lane's CLAUDE_CONFIG_DIR never leaks into the calling shell
+# when tmux is skipped (ELISYS_NO_TMUX=1 or tmux absent).
 _elisys_tmux() {
   local fn="$1"; shift
   if [ -n "${TMUX:-}" ] || [ "${ELISYS_NO_TMUX:-}" = 1 ]; then "$fn" "$@"; return; fi
@@ -79,15 +96,31 @@ _elisys_tmux() {
   tmux new-session -A -s "elisys-${ELISYS_LANE:-1}" -c "$HOME/projects/elisys" "${fwd[@]}" \
     bash -ic 'export ELISYS_NO_TMUX=1; "$@"; rc=$?; if [ "$rc" -ne 0 ]; then printf "\nexited with status %s; press Enter to close this tmux session\n" "$rc"; read -r _; fi; exit "$rc"' _ "$fn" "$@"
 }
-_elisys_run_dispatch() { cd ~/projects/elisys && ELISYS_LAUNCH=dispatch CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'sonnet[1m]' --effort high "$@"; }
-_elisys_run_build()    { cd ~/projects/elisys && ELISYS_LAUNCH=build CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'opus[1m]' --effort high "$@"; }
-_elisys_run_docs()     { cd ~/projects/elisys && ELISYS_LAUNCH=docs CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model sonnet --effort medium "$@"; }
-_elisys_run_deep()     { cd ~/projects/elisys && ELISYS_LAUNCH=deep CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model fable --effort high "$@"; }
-elisys()       { _elisys_tmux _elisys_run_dispatch "$@"; }
-elisys-build() { _elisys_tmux _elisys_run_build "$@"; }
-elisys-docs()  { _elisys_tmux _elisys_run_docs "$@"; }
-elisys-deep()  { _elisys_tmux _elisys_run_deep "$@"; }
-elisys-api()   { _elisys_tmux _elisys_run_api "$@"; }
+_elisys_lane_env() {
+  export ELISYS_LANE="${ELISYS_LANE:-1}"
+  case "$ELISYS_LANE" in
+    1) unset CLAUDE_CONFIG_DIR ;;
+    2) export CLAUDE_CONFIG_DIR="$HOME/.claude-lane2"
+       ELISYS_LANE_PROFILE="$CLAUDE_CONFIG_DIR" "$HOME/.claude/skills/elisys-lean/bin/elisys-lane-profile" \
+         || { printf 'elisys: the lane 2 folder %s could not be prepared (see above)\n' "$CLAUDE_CONFIG_DIR" >&2; return 1; } ;;
+    *) printf 'elisys: ELISYS_LANE is %s; a lane is 1 or 2\n' "$ELISYS_LANE" >&2; return 1 ;;
+  esac
+}
+_elisys_run_dispatch() ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=dispatch CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'sonnet[1m]' --effort high "$@" )
+_elisys_run_build()    ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=build CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'opus[1m]' --effort high "$@" )
+_elisys_run_docs()     ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=docs CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model sonnet --effort medium "$@" )
+_elisys_run_deep()     ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=deep CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model fable --effort high "$@" )
+elisys()       { ELISYS_LANE=1 _elisys_tmux _elisys_run_dispatch "$@"; }
+elisys-build() { ELISYS_LANE=1 _elisys_tmux _elisys_run_build "$@"; }
+elisys-docs()  { ELISYS_LANE=1 _elisys_tmux _elisys_run_docs "$@"; }
+elisys-deep()  { ELISYS_LANE=1 _elisys_tmux _elisys_run_deep "$@"; }
+elisys-api()   { ELISYS_LANE=1 _elisys_tmux _elisys_run_api "$@"; }
+# The lane 2 aliases written by hand before v1.1.6 would turn these definitions into a syntax
+# error when ~/.bashrc is sourced again in a shell that still has them, so they go first.
+unalias elisys2 elisys2-build elisys2-docs 2>/dev/null || true
+elisys2()       { ELISYS_LANE=2 _elisys_tmux _elisys_run_dispatch "$@"; }
+elisys2-build() { ELISYS_LANE=2 _elisys_tmux _elisys_run_build "$@"; }
+elisys2-docs()  { ELISYS_LANE=2 _elisys_tmux _elisys_run_docs "$@"; }
 _elisys_run_api() (
   set +x
   fail() { printf 'elisys-api: %s\n' "$*" >&2; exit 1; }
@@ -117,7 +150,7 @@ _elisys_run_api() (
   unset line ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
   cap=()
   for a in "$@"; do case "$a" in -p|--print) cap=(--max-budget-usd "$budget") ;; esac; done
-  export ANTHROPIC_API_KEY="$key" CLAUDE_CONFIG_DIR="$HOME/.claude-api" ELISYS_LAUNCH=api ELISYS_API_BUDGET_USD="$budget" CLAUDE_CODE_SUBAGENT_MODEL=sonnet
+  export ANTHROPIC_API_KEY="$key" CLAUDE_CONFIG_DIR="$HOME/.claude-api" ELISYS_LAUNCH=api ELISYS_API_BUDGET_USD="$budget" CLAUDE_CODE_SUBAGENT_MODEL=sonnet ELISYS_LANE=1
   unset key keyfile mode helper a budget
   cd ~/projects/elisys || fail "cannot enter ~/projects/elisys."
   exec claude --model sonnet --effort high "${cap[@]}" "$@"
@@ -125,7 +158,7 @@ _elisys_run_api() (
 alias elisys-usage='node ~/.claude/skills/elisys-lean/bin/elisys-usage'
 # <<< elisys-lean launchers <<<
 RCEOF
-echo "  launchers: elisys (dispatcher, Sonnet 1M high), elisys-build, elisys-docs, elisys-deep, elisys-api (Sonnet high on an API key), elisys-usage added to ~/.bashrc"
+echo "  launchers: elisys (dispatcher, Sonnet 1M high), elisys-build, elisys-docs, elisys-deep, elisys-api (Sonnet high on an API key), lane 2's elisys2, elisys2-build, elisys2-docs, elisys-usage added to ~/.bashrc"
 
 # The elisys-api profile. Needs no key: the key file is created by you, never by this installer, and
 # no credential or sign-in file is ever linked or copied (see bin/elisys-api-profile).

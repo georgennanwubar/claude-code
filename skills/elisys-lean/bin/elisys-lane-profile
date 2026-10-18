@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# elisys-lane-profile (elisys-lean v1.1.6, order 266, ELISYS-717): prepare lane 2's Claude Code
+# folder, ~/.claude-lane2, to George's two rulings of 18 October 2026 (registers §164.1, 4 and 5).
+# Used only by the lane 2 launchers (elisys2, elisys2-build, elisys2-docs); ~/.claude-api keeps
+# bin/elisys-api-profile and is unchanged. Idempotent: a second run changes nothing.
+#
+#   - SHARED BY LINK, never by copy (ruling 4): settings.json, CLAUDE.md, skills, commands, agents,
+#     plugins, keybindings.json, output-styles. Only an item that exists in ~/.claude is linked; the
+#     rest are named as absent there, and nothing is ever created in ~/.claude.
+#   - PROJECT MEMORY NOTES ONLY (ruling 5): projects/<slug>/memory, the slug being the main
+#     checkout's, links to lane 1's; nothing else under projects/ is shared, so /resume in one lane
+#     never lists the other's sessions. If lane 1 has no memory folder, nothing is linked.
+#   - PER ACCOUNT, never linked or copied: .credentials.json, .claude.json, history.jsonl (sign-in
+#     and session history). One found as a link is a hard stop (exit 1).
+#   - A COPY of a shared item already in lane 2's folder is reported with the exact command that
+#     replaces it, and is never replaced silently. MCP servers are added in each lane by hand
+#     (`claude mcp add` writes the account's own .claude.json).
+#   - It writes only inside lane 2's folder, and never into ~/.claude.
+# Usage: elisys-lane-profile [-v|--verbose]
+# Test overrides: ELISYS_MAIN_CONFIG, ELISYS_LANE_PROFILE, ELISYS_PROJECT_DIR.
+set -euo pipefail
+
+MAIN="${ELISYS_MAIN_CONFIG:-$HOME/.claude}"
+LANE="${ELISYS_LANE_PROFILE:-$HOME/.claude-lane2}"
+PROJECT_DIR="${ELISYS_PROJECT_DIR:-$HOME/projects/elisys}"
+SHARED=(settings.json CLAUDE.md skills commands agents plugins keybindings.json output-styles)
+PER_ACCOUNT=(.credentials.json .claude.json history.jsonl)
+VERBOSE=0
+case "${1:-}" in -v|--verbose) VERBOSE=1 ;; "") ;; *) echo "usage: elisys-lane-profile [-v|--verbose]" >&2; exit 2 ;; esac
+
+say()  { [ "$VERBOSE" = 1 ] && printf '  %s\n' "$*" || true; }
+note() { printf 'elisys-lane-profile: %s\n' "$*" >&2; }
+die()  { note "$*"; exit 1; }
+
+[ -d "$MAIN" ] || die "$MAIN does not exist; run lane 1's launcher once first."
+main_real="$(readlink -f -- "$MAIN")"
+lane_real="$(readlink -f -- "$LANE" 2>/dev/null || printf '%s' "$LANE")"
+[ "$main_real" != "$lane_real" ] || die "lane 2's folder $LANE is lane 1's own folder; refusing."
+
+# A name that carries sign-in or key material is never linked or copied, whatever the lists say.
+is_credential() {
+  case "$1" in .credentials.json|.claude.json|history.jsonl|*credentials*|*.env|anthropic-api*|*apikey*|*api-key*|*token*) return 0 ;; esac
+  return 1
+}
+
+if [ ! -e "$LANE" ]; then
+  mkdir -m 700 -- "$LANE"
+  say "made   $LANE (mode 700)"
+fi
+mode="$(stat -c %a -- "$LANE")"
+[ "$mode" = 700 ] || note "$LANE has mode $mode, not 700; to fix it: chmod 700 '$LANE'"
+
+# link_item SRC DST LABEL: DST becomes a link to SRC when DST is absent; an existing copy or a link
+# elsewhere is reported with the command that replaces it and left as it is.
+link_item() {
+  local src="$1" dst="$2" label="$3"
+  if is_credential "$(basename -- "$src")" || is_credential "$(basename -- "$dst")"; then
+    die "refusing to share '$label': it looks like a credential"
+  fi
+  if [ ! -e "$src" ] && [ ! -L "$src" ]; then say "absent $label (not in $MAIN, so not linked)"; return 0; fi
+  if [ -L "$dst" ]; then
+    if [ "$(readlink -f -- "$dst" 2>/dev/null || true)" = "$(readlink -f -- "$src")" ]; then say "linked $label"; return 0; fi
+    note "$dst links to $(readlink -- "$dst"), not $src; left as it is. To replace it: rm '$dst' && ln -s '$src' '$dst'"
+    return 0
+  fi
+  if [ -e "$dst" ]; then
+    note "$dst is a COPY, not a link to $src; left as it is. To replace it: mkdir -p '$LANE/_replaced-copies' && mv '$dst' '$LANE/_replaced-copies/$(basename -- "$dst").$(date -u +%Y%m%dT%H%M%SZ)' && ln -s '$src' '$dst'"
+    return 0
+  fi
+  ln -s -- "$src" "$dst"
+  say "link   $label -> $src"
+}
+
+for name in "${SHARED[@]}"; do link_item "$MAIN/$name" "$LANE/$name" "$name"; done
+
+# Project memory notes only (ruling 5): the memory folder of the main checkout's project, nothing else.
+slug="$(readlink -f -- "$PROJECT_DIR" 2>/dev/null | sed 's/[^A-Za-z0-9]/-/g')"
+if [ -z "$slug" ]; then
+  note "cannot resolve $PROJECT_DIR; project memory not linked"
+elif [ ! -d "$MAIN/projects/$slug/memory" ]; then
+  note "lane 1 has no memory folder at $MAIN/projects/$slug/memory; nothing linked (it is never created from here)"
+else
+  if [ -L "$LANE/projects" ] || [ -L "$LANE/projects/$slug" ]; then
+    die "$LANE/projects or $LANE/projects/$slug is a link; that would share lane 1's sessions. Remove the link, then run again."
+  fi
+  mkdir -p -m 700 -- "$LANE/projects/$slug"
+  link_item "$MAIN/projects/$slug/memory" "$LANE/projects/$slug/memory" "projects/$slug/memory"
+fi
+
+# Sign-ins and history stay per account: one found as a link is a hard stop.
+for name in "${PER_ACCOUNT[@]}"; do
+  [ -L "$LANE/$name" ] && die "$LANE/$name is a link; a sign-in or history file is never shared. Remove the link (rm '$LANE/$name'), then sign in again in lane 2."
+done
+exit 0
