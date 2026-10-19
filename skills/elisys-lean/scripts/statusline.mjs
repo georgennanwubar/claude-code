@@ -5,10 +5,11 @@
 // the model the session runs on. So the status line keeps a snapshot per model family and shows
 // the live weekly gauge for this session's family PLUS the last-seen gauge for the other family,
 // with its age. Set ELISYS_LEAN_SCOPED_7D=0 to turn the split off if /usage shows the feed is
-// not model-scoped. Runs locally; consumes no API tokens; fails open.
+// not model-scoped. v1.1.7 (ELISYS-876): snapshots are kept per account in the config folder's own
+// elisys-lean-limits/, never in the plugin data directory the two lanes share. Runs locally; consumes no API tokens; fails open.
 import { writeFileSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { dataDir, watParts } from './common.mjs';
+import { limitsDir, watParts, gaugeState, formatAge } from './common.mjs';
 
 const SCOPED = process.env.ELISYS_LEAN_SCOPED_7D !== '0';
 const familyOf = id => (/fable|mythos/i.test(id || '') ? 'fable' : 'other');
@@ -66,18 +67,19 @@ process.stdin.on('end', () => {
     parts.push(`${label(key)} ${col(v)}${Math.round(v)}%${X}`);
   }
 
-  // The other family's weekly gauge, from its last snapshot, with age.
+  // The other family's weekly gauge, from the last session of that family on THIS account (v1.1.7).
+  // It is never live in this session, so it is labelled by how old it is: a reading within
+  // LIVE_MAX_MIN, or "stale ..., not live". A snapshot from a week that has since reset shows no
+  // percentage at all.
   if (SCOPED && rl.seven_day) {
     try {
-      const f = join(dataDir(), `rate-limits-${other}.json`);
-      const snap = JSON.parse(readFileSync(f, 'utf8'));
-      const v = snap?.rate_limits?.seven_day?.used_percentage;
-      if (v != null) {
-        const ageMin = Math.max(0, Math.round((Date.now() - statSync(f).mtimeMs) / 60e3));
-        const age = ageMin < 60 ? `${ageMin}m` : ageMin < 1440 ? `${Math.round(ageMin / 60)}h` : `${Math.round(ageMin / 1440)}d`;
-        parts.push(`7d·${other} ${col(v)}${Math.round(v)}%${X}${D}(${age})${X}`);
-      }
-    } catch { /* no snapshot for the other family yet */ }
+      const snap = JSON.parse(readFileSync(join(limitsDir(), `rate-limits-${other}.json`), 'utf8'));
+      const g = gaugeState(snap);
+      if (g.state === 'recent') parts.push(`7d·${other} ${col(g.pct)}${Math.round(g.pct)}%${X}${D}(${formatAge(g.ageMin)})${X}`);
+      else if (g.state === 'stale') parts.push(`7d·${other} ${D}${Math.round(g.pct)}% stale ${formatAge(g.ageMin)}, not live${X}`);
+      else if (g.state === 'rolled') parts.push(`7d·${other} ${D}reset since, not live${X}`);
+      else parts.push(`7d·${other} ${D}not seen on this account, not live${X}`);
+    } catch { parts.push(`7d·${other} ${D}not seen on this account, not live${X}`); }
   }
 
   const cache = d.prompt_cache;
@@ -90,7 +92,7 @@ process.stdin.on('end', () => {
     if (Object.keys(rl).length) {
       const body = JSON.stringify({ at: watParts().iso, model: modelId || null, family, rate_limits: rl }) + '\n';
       for (const name of ['rate-limits.json', `rate-limits-${family}.json`]) {
-        const f = join(dataDir(), name);
+        const f = join(limitsDir(), name);
         let stale = true;
         try { stale = Date.now() - statSync(f).mtimeMs > 60e3; } catch { /* absent: write it */ }
         if (stale) writeFileSync(f, body);
