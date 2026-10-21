@@ -44,8 +44,11 @@ cat >> "$RC" << 'RCEOF'
 # >>> elisys-lean launchers >>>
 # `elisys` is the everyday launcher: a dispatcher session on Sonnet 1M at high effort
 # (ELISYS_LAUNCH=dispatch). It no longer reads the queue to choose a model. The next three are
-# manual overrides: elisys-build (Opus 1M, high), elisys-docs (Sonnet, medium) and elisys-deep
-# (Fable, high; pinned to claude-fable-5-1 by ANTHROPIC_DEFAULT_FABLE_MODEL in settings.json).
+# manual launchers: elisys-build (Sonnet 1M, high; since v1.1.8 it starts on Sonnet like every session, George's
+# ruling of 21 October 2026, ELISYS-905), elisys-docs (Sonnet, medium) and elisys-deep
+# (Fable, high; pinned to claude-fable-5-1 by ANTHROPIC_DEFAULT_FABLE_MODEL in settings.json). elisys-docs and
+# elisys-deep stay George's direct overrides. A work order that needs another model for its own session
+# names it, and the lane switches with /model for that order alone; no launcher picks it.
 # Each sets ELISYS_LAUNCH to build, docs or deep. No --autocompact cap: compaction happens only at
 # Claude Code's default, near the window's end. Named subagents default to sonnet via
 # CLAUDE_CODE_SUBAGENT_MODEL.
@@ -107,7 +110,7 @@ _elisys_lane_env() {
   esac
 }
 _elisys_run_dispatch() ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=dispatch CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'sonnet[1m]' --effort high "$@" )
-_elisys_run_build()    ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=build CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'opus[1m]' --effort high "$@" )
+_elisys_run_build()    ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=build CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'sonnet[1m]' --effort high "$@" )
 _elisys_run_docs()     ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=docs CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model sonnet --effort medium "$@" )
 _elisys_run_deep()     ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=deep CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model fable --effort high "$@" )
 elisys()       { ELISYS_LANE=1 _elisys_tmux _elisys_run_dispatch "$@"; }
@@ -158,7 +161,7 @@ _elisys_run_api() (
 alias elisys-usage='node ~/.claude/skills/elisys-lean/bin/elisys-usage'
 # <<< elisys-lean launchers <<<
 RCEOF
-echo "  launchers: elisys (dispatcher, Sonnet 1M high), elisys-build, elisys-docs, elisys-deep, elisys-api (Sonnet high on an API key), lane 2's elisys2, elisys2-build, elisys2-docs, elisys-usage added to ~/.bashrc"
+echo "  launchers: elisys (dispatcher, Sonnet 1M high), elisys-build (Sonnet 1M high), elisys-docs, elisys-deep, elisys-api (Sonnet high on an API key), lane 2's elisys2, elisys2-build, elisys2-docs, elisys-usage added to ~/.bashrc"
 
 # The elisys-api profile. Needs no key: the key file is created by you, never by this installer, and
 # no credential or sign-in file is ever linked or copied (see bin/elisys-api-profile).

@@ -1,0 +1,257 @@
+# ~/.bashrc: executed by bash(1) for non-login shells.
+# see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
+# for examples
+
+# If not running interactively, don't do anything
+case $- in
+    *i*) ;;
+      *) return;;
+esac
+
+# don't put duplicate lines or lines starting with space in the history.
+# See bash(1) for more options
+HISTCONTROL=ignoreboth
+
+# append to the history file, don't overwrite it
+shopt -s histappend
+
+# for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
+HISTSIZE=1000
+HISTFILESIZE=2000
+
+# check the window size after each command and, if necessary,
+# update the values of LINES and COLUMNS.
+shopt -s checkwinsize
+
+# If set, the pattern "**" used in a pathname expansion context will
+# match all files and zero or more directories and subdirectories.
+#shopt -s globstar
+
+# make less more friendly for non-text input files, see lesspipe(1)
+[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+
+# set variable identifying the chroot you work in (used in the prompt below)
+if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
+    debian_chroot=$(cat /etc/debian_chroot)
+fi
+
+# set a fancy prompt (non-color, unless we know we "want" color)
+case "$TERM" in
+    xterm-color|*-256color) color_prompt=yes;;
+esac
+
+# uncomment for a colored prompt, if the terminal has the capability; turned
+# off by default to not distract the user: the focus in a terminal window
+# should be on the output of commands, not on the prompt
+#force_color_prompt=yes
+
+if [ -n "$force_color_prompt" ]; then
+    if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
+	# We have color support; assume it's compliant with Ecma-48
+	# (ISO/IEC-6429). (Lack of such support is extremely rare, and such
+	# a case would tend to support setf rather than setaf.)
+	color_prompt=yes
+    else
+	color_prompt=
+    fi
+fi
+
+if [ "$color_prompt" = yes ]; then
+    PS1='${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+else
+    PS1='${debian_chroot:+($debian_chroot)}\u@\h:\w\$ '
+fi
+unset color_prompt force_color_prompt
+
+# If this is an xterm set the title to user@host:dir
+case "$TERM" in
+xterm*|rxvt*)
+    PS1="\[\e]0;${debian_chroot:+($debian_chroot)}\u@\h: \w\a\]$PS1"
+    ;;
+*)
+    ;;
+esac
+
+# enable color support of ls and also add handy aliases
+if [ -x /usr/bin/dircolors ]; then
+    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    alias ls='ls --color=auto'
+    #alias dir='dir --color=auto'
+    #alias vdir='vdir --color=auto'
+
+    alias grep='grep --color=auto'
+    alias fgrep='fgrep --color=auto'
+    alias egrep='egrep --color=auto'
+fi
+
+# colored GCC warnings and errors
+#export GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01'
+
+# some more ls aliases
+alias ll='ls -alF'
+alias la='ls -A'
+alias l='ls -CF'
+
+# Add an "alert" alias for long running commands.  Use like so:
+#   sleep 10; alert
+alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
+
+# Alias definitions.
+# You may want to put all your additions into a separate file like
+# ~/.bash_aliases, instead of adding them here directly.
+# See /usr/share/doc/bash-doc/examples in the bash-doc package.
+
+if [ -f ~/.bash_aliases ]; then
+    . ~/.bash_aliases
+fi
+
+# enable programmable completion features (you don't need to enable
+# this, if it's already enabled in /etc/bash.bashrc and /etc/profile
+# sources /etc/bash.bashrc).
+if ! shopt -oq posix; then
+  if [ -f /usr/share/bash-completion/bash_completion ]; then
+    . /usr/share/bash-completion/bash_completion
+  elif [ -f /etc/bash_completion ]; then
+    . /etc/bash_completion
+  fi
+fi
+
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+export USERPROFILE=$(wslpath -u "$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r\n ')")
+
+# pnpm
+export PNPM_HOME="/home/me/.local/share/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME/bin:"*) ;;
+  *) export PATH="$PNPM_HOME/bin:$PATH" ;;
+esac
+# pnpm end
+
+# Golang
+export GOPATH=$HOME/go
+export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
+# Golang end
+alias cc="tmux new-session -A -s elisys -c ~/projects/elisys \\; send-keys \"claude\" Enter"
+alias cc="tmux new-session -A -s elisys -c ~/projects/elisys \\; send-keys \"claude\" Enter"
+export TURBO_REMOTE_CACHE_SIGNATURE_KEY="Few0q+sBc2458izhI7Lc5zSbv0JdEhyNzNc5gDD8j6U="
+# >>> elisys-lean launchers >>>
+# `elisys` is the everyday launcher: a dispatcher session on Sonnet 1M at high effort
+# (ELISYS_LAUNCH=dispatch). It no longer reads the queue to choose a model. The next three are
+# manual overrides: elisys-build (Opus 1M, high), elisys-docs (Sonnet, medium) and elisys-deep
+# (Fable, high; pinned to claude-fable-5-1 by ANTHROPIC_DEFAULT_FABLE_MODEL in settings.json).
+# Each sets ELISYS_LAUNCH to build, docs or deep. No --autocompact cap: compaction happens only at
+# Claude Code's default, near the window's end. Named subagents default to sonnet via
+# CLAUDE_CODE_SUBAGENT_MODEL.
+# `elisys-api` is the overflow launcher: Sonnet at high effort on a pay-per-token API key
+# (ELISYS_LAUNCH=api), in its own Claude Code profile, ~/.claude-api, so its sign-in and settings
+# are separate and the four launchers above never see the key. The key is read at launch from
+# ~/.config/elisys/anthropic-api.env (ANTHROPIC_API_KEY=..., owned by you, no group or other
+# permission bits). It exists only in the launched claude process's environment: never in this
+# shell, never in an argument, never printed. ELISYS_API_BUDGET_USD (default 20) is the session
+# budget the status line measures cost against; Claude Code enforces a budget flag only with -p.
+# Since v1.1.5 every launcher starts Claude Code inside a named tmux session when it is not already
+# inside tmux: the session is elisys-${ELISYS_LANE:-1} (lane 1 is elisys-1, ELISYS_LANE=2 is
+# elisys-2), `tmux new-session -A` reattaches to a running one instead of starting a second Claude,
+# inside tmux the launcher starts directly, and ELISYS_NO_TMUX=1 skips tmux. The model, effort and
+# ELISYS_LAUNCH each launcher sets are unchanged. The command runs in an interactive bash in the pane
+# so ~/.bashrc loads there and a secret (the API key) is read INSIDE the pane and never put in an
+# argument; a non-zero exit waits for Enter so an error message is not lost when the pane closes.
+# Since v1.1.6 (order 266, ELISYS-717) every launcher names its lane, because two lanes share the one
+# checkout and `node tools/lanes.mjs` refuses to sweep, claim or make a worktree with ELISYS_LANE
+# unset. Lane 1 (elisys, elisys-build, elisys-docs, elisys-deep, elisys-api) runs with ELISYS_LANE=1
+# on its usual profile. Lane 2 (elisys2, elisys2-build, elisys2-docs) runs with ELISYS_LANE=2 on its
+# own folder, ~/.claude-lane2, in the tmux session elisys-2. George's rulings of 18 October 2026
+# (registers §164.1, 4 and 5): bin/elisys-lane-profile LINKS lane 2's shared items to ~/.claude
+# (settings.json, CLAUDE.md, skills, commands, agents, plugins, keybindings.json, output-styles) and
+# the Elisys project's memory notes only (projects/<slug>/memory), never copies them, never links a
+# sign-in, .claude.json or history, and never writes into ~/.claude; lane 2 signs in once with its
+# own account. MCP servers are added in each lane (`claude mcp add` writes that account's
+# .claude.json). `node tools/lanes.mjs status` reports a shared item that is a copy, not a link.
+# Both lanes start in ~/projects/elisys, the main checkout; each order is worked in the lane's own
+# worktree (node tools/lanes.mjs worktree new). The lane is set before tmux, so the session name
+# follows it, and read again inside the pane, so a pane a running tmux server starts keeps it;
+# CLAUDE_CONFIG_DIR is derived from the lane inside the pane, because tmux forwards only ELISYS_*.
+# Each run function is a subshell, so a lane's CLAUDE_CONFIG_DIR never leaks into the calling shell
+# when tmux is skipped (ELISYS_NO_TMUX=1 or tmux absent).
+_elisys_tmux() {
+  local fn="$1"; shift
+  if [ -n "${TMUX:-}" ] || [ "${ELISYS_NO_TMUX:-}" = 1 ]; then "$fn" "$@"; return; fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    printf 'elisys: tmux is not installed, so this starts without it. Install it with: sudo apt install tmux\n' >&2
+    "$fn" "$@"; return
+  fi
+  # A pane started by an already-running tmux server does not inherit this shell's variables, so
+  # every exported ELISYS_* setting (ELISYS_LANE, ELISYS_API_KEYFILE, ELISYS_API_BUDGET_USD...) is
+  # passed explicitly with -e. They are configuration, never secrets: the API key is not an ELISYS_*
+  # variable and is read inside the pane from its key file.
+  local -a fwd=(); local v
+  while IFS= read -r v; do fwd+=(-e "$v=${!v}"); done < <(compgen -e | grep '^ELISYS_' | grep -v '^ELISYS_NO_TMUX$')
+  tmux new-session -A -s "elisys-${ELISYS_LANE:-1}" -c "$HOME/projects/elisys" "${fwd[@]}" \
+    bash -ic 'export ELISYS_NO_TMUX=1; "$@"; rc=$?; if [ "$rc" -ne 0 ]; then printf "\nexited with status %s; press Enter to close this tmux session\n" "$rc"; read -r _; fi; exit "$rc"' _ "$fn" "$@"
+}
+_elisys_lane_env() {
+  export ELISYS_LANE="${ELISYS_LANE:-1}"
+  case "$ELISYS_LANE" in
+    1) unset CLAUDE_CONFIG_DIR ;;
+    2) export CLAUDE_CONFIG_DIR="$HOME/.claude-lane2"
+       ELISYS_LANE_PROFILE="$CLAUDE_CONFIG_DIR" "$HOME/.claude/skills/elisys-lean/bin/elisys-lane-profile" \
+         || { printf 'elisys: the lane 2 folder %s could not be prepared (see above)\n' "$CLAUDE_CONFIG_DIR" >&2; return 1; } ;;
+    *) printf 'elisys: ELISYS_LANE is %s; a lane is 1 or 2\n' "$ELISYS_LANE" >&2; return 1 ;;
+  esac
+}
+_elisys_run_dispatch() ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=dispatch CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'sonnet[1m]' --effort high "$@" )
+_elisys_run_build()    ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=build CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model 'opus[1m]' --effort high "$@" )
+_elisys_run_docs()     ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=docs CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model sonnet --effort medium "$@" )
+_elisys_run_deep()     ( _elisys_lane_env || exit 1; cd ~/projects/elisys && ELISYS_LAUNCH=deep CLAUDE_CODE_SUBAGENT_MODEL=sonnet claude --model fable --effort high "$@" )
+elisys()       { ELISYS_LANE=1 _elisys_tmux _elisys_run_dispatch "$@"; }
+elisys-build() { ELISYS_LANE=1 _elisys_tmux _elisys_run_build "$@"; }
+elisys-docs()  { ELISYS_LANE=1 _elisys_tmux _elisys_run_docs "$@"; }
+elisys-deep()  { ELISYS_LANE=1 _elisys_tmux _elisys_run_deep "$@"; }
+elisys-api()   { ELISYS_LANE=1 _elisys_tmux _elisys_run_api "$@"; }
+# The lane 2 aliases written by hand before v1.1.6 would turn these definitions into a syntax
+# error when ~/.bashrc is sourced again in a shell that still has them, so they go first.
+unalias elisys2 elisys2-build elisys2-docs 2>/dev/null || true
+elisys2()       { ELISYS_LANE=2 _elisys_tmux _elisys_run_dispatch "$@"; }
+elisys2-build() { ELISYS_LANE=2 _elisys_tmux _elisys_run_build "$@"; }
+elisys2-docs()  { ELISYS_LANE=2 _elisys_tmux _elisys_run_docs "$@"; }
+_elisys_run_api() (
+  set +x
+  fail() { printf 'elisys-api: %s\n' "$*" >&2; exit 1; }
+  keyfile="${ELISYS_API_KEYFILE:-$HOME/.config/elisys/anthropic-api.env}"
+  [ -L "$keyfile" ] && fail "$keyfile is a symlink; save the key in that file itself, not a link."
+  [ -e "$keyfile" ] || fail "no key file at $keyfile. Create it with one line, ANTHROPIC_API_KEY=<your key>, then run: chmod 600 $keyfile"
+  [ -f "$keyfile" ] || fail "$keyfile is not a regular file."
+  [ -O "$keyfile" ] || fail "$keyfile is not owned by you; recreate it as your own user."
+  mode=$(stat -c %a -- "$keyfile") || fail "cannot read the permissions of $keyfile."
+  [ $((8#$mode & 077)) -eq 0 ] || fail "$keyfile has mode $mode, readable by other users. Run: chmod 600 $keyfile"
+  [ -r "$keyfile" ] || fail "$keyfile is not readable by you; run: chmod 600 $keyfile"
+  budget="${ELISYS_API_BUDGET_USD:-20}"
+  case "$budget" in ''|*[!0-9.]*|*.*.*|.) fail "ELISYS_API_BUDGET_USD must be a plain number such as 20 or 7.5." ;; esac
+  command -v claude >/dev/null || fail "claude is not on PATH."
+  helper="$HOME/.claude/skills/elisys-lean/bin/elisys-api-profile"
+  [ -x "$helper" ] || fail "$helper is missing; reinstall elisys-lean (bash install.sh)."
+  "$helper" || fail "the ~/.claude-api profile could not be prepared."
+  key=
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
+    case "$line" in ANTHROPIC_API_KEY=*|"export ANTHROPIC_API_KEY="*) key=${line#*ANTHROPIC_API_KEY=} ;; esac
+  done < "$keyfile"
+  key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+  key=${key#[\"\']}; key=${key%[\"\']}
+  [ -n "$key" ] || fail "$keyfile has no ANTHROPIC_API_KEY=<key> line, or its value is empty."
+  case "$key" in *[[:space:]]*|*[[:cntrl:]]*) fail "the ANTHROPIC_API_KEY value in $keyfile contains spaces or control characters." ;; esac
+  unset line ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
+  cap=()
+  for a in "$@"; do case "$a" in -p|--print) cap=(--max-budget-usd "$budget") ;; esac; done
+  export ANTHROPIC_API_KEY="$key" CLAUDE_CONFIG_DIR="$HOME/.claude-api" ELISYS_LAUNCH=api ELISYS_API_BUDGET_USD="$budget" CLAUDE_CODE_SUBAGENT_MODEL=sonnet ELISYS_LANE=1
+  unset key keyfile mode helper a budget
+  cd ~/projects/elisys || fail "cannot enter ~/projects/elisys."
+  exec claude --model sonnet --effort high "${cap[@]}" "$@"
+)
+alias elisys-usage='node ~/.claude/skills/elisys-lean/bin/elisys-usage'
+# <<< elisys-lean launchers <<<
+# Lane 2: the second Max account (ELISYS-698); ELISYS_LANE=2 names its tmux session elisys-2 (ELISYS-713)
+alias claude2='ELISYS_LANE=2 CLAUDE_CONFIG_DIR=~/.claude-lane2 claude'
+export PATH="/home/me/.local/opt/google-cloud-sdk/bin:$PATH"  # gke-gcloud-auth-plugin path (dev cloud)
