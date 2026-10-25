@@ -127,6 +127,7 @@ elisys2-docs()  { ELISYS_LANE=2 _elisys_tmux _elisys_run_docs "$@"; }
 _elisys_run_api() (
   set +x
   fail() { printf 'elisys-api: %s\n' "$*" >&2; exit 1; }
+  fail "RETIRED on 24 October 2026 (ELISYS-929): the monthly API credits cannot pay for Claude Code sessions, and the overnight run on API credits of 15 October failed with 'Credit balance too low'. Nothing is launched. Use elisys, elisys-build or elisys2-build. The key file and ~/.claude-api are left as they are; removing them is George's decision."
   keyfile="${ELISYS_API_KEYFILE:-$HOME/.config/elisys/anthropic-api.env}"
   [ -L "$keyfile" ] && fail "$keyfile is a symlink; save the key in that file itself, not a link."
   [ -e "$keyfile" ] || fail "no key file at $keyfile. Create it with one line, ANTHROPIC_API_KEY=<your key>, then run: chmod 600 $keyfile"
