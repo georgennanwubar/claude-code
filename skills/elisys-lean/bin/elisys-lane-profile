@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # elisys-lane-profile (elisys-lean v1.1.6, order 266, ELISYS-717): prepare lane 2's Claude Code
 # folder, ~/.claude-lane2, to George's two rulings of 18 October 2026 (registers §164.1, 4 and 5).
-# Used only by the lane 2 launchers (elisys2, elisys2-build, elisys2-docs); ~/.claude-api keeps
+# Used only by the lane 2 and lane 3 launchers (elisys2*, elisys3*; order 333, ELISYS-1046: lane 3 runs it with
+# ELISYS_LANE_PROFILE=~/.claude-lane3, the folder the launcher names); ~/.claude-api keeps
 # bin/elisys-api-profile and is unchanged. Idempotent: a second run changes nothing.
 #
 #   - SHARED BY LINK, never by copy (ruling 4): settings.json, CLAUDE.md, skills, commands, agents,
@@ -35,7 +36,7 @@ die()  { note "$*"; exit 1; }
 [ -d "$MAIN" ] || die "$MAIN does not exist; run lane 1's launcher once first."
 main_real="$(readlink -f -- "$MAIN")"
 lane_real="$(readlink -f -- "$LANE" 2>/dev/null || printf '%s' "$LANE")"
-[ "$main_real" != "$lane_real" ] || die "lane 2's folder $LANE is lane 1's own folder; refusing."
+[ "$main_real" != "$lane_real" ] || die "this lane's folder $LANE is lane 1's own folder; refusing."
 
 # A name that carries sign-in or key material is never linked or copied, whatever the lists say.
 is_credential() {
@@ -89,6 +90,6 @@ fi
 
 # Sign-ins and history stay per account: one found as a link is a hard stop.
 for name in "${PER_ACCOUNT[@]}"; do
-  [ -L "$LANE/$name" ] && die "$LANE/$name is a link; a sign-in or history file is never shared. Remove the link (rm '$LANE/$name'), then sign in again in lane 2."
+  [ -L "$LANE/$name" ] && die "$LANE/$name is a link; a sign-in or history file is never shared. Remove the link (rm '$LANE/$name'), then sign in again in this lane."
 done
 exit 0
