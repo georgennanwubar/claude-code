@@ -100,5 +100,10 @@
       "source": "anthropic-example",
       "updatedAt": "2026-11-16T17:00:22.704800Z"
     }
+  ],
+  "pendingClaims": [
+    "724872:7426104/xlsx",
+    "724872:7426104/pptx",
+    "724872:7426104/docx"
   ]
 }
